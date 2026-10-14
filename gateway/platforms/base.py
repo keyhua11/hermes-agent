@@ -18,7 +18,7 @@ import time
 import uuid
 import weakref
 from abc import ABC, abstractmethod
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from utils import normalize_proxy_url
 from agent.i18n import t
@@ -1527,10 +1527,17 @@ def cache_document_from_bytes(data: bytes, filename: str) -> str:
     """Save raw document bytes to the cache as ``doc_{uuid12}_{original_name}`` and return
     the absolute path; raises ValueError if the sanitized path escapes the cache directory."""
     cache_dir = get_document_cache_dir()
-    # Sanitize: strip directory components, null bytes, and control characters
-    safe_name = (Path(filename).name if filename else "document").replace("\x00", "").strip()
+    # Sanitize: strip directory components, percent-decode an encoded name (a platform may hand
+    # us ``%E4%B8%AD%E6%96%87.pdf`` — roughly 3x longer in bytes, which overflows Windows'
+    # MAX_PATH for ordinary CJK filenames), replace the characters Windows forbids in a path
+    # component, and cap the stem so a single long name cannot overflow that limit either.
+    safe_name = Path(unquote(filename)).name if filename else "document"
+    safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", safe_name).strip()
     if not safe_name or safe_name in {".", ".."}:
         safe_name = "document"
+    _stem, _ext = os.path.splitext(safe_name)
+    if len(_stem) > 120:
+        safe_name = _stem[:120] + _ext
     filepath = cache_dir / f"doc_{uuid.uuid4().hex[:12]}_{safe_name}"
     # Final safety check: ensure path stays inside cache dir
     if not filepath.resolve().is_relative_to(cache_dir.resolve()):
