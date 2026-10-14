@@ -152,8 +152,12 @@ class WeComMediaMixin:
     def _guess_filename(url: str, content_disposition: Optional[str], content_type: str) -> str:
         match = re.search(r'filename="?([^";]+)"?', content_disposition or "")
         if match:
-            return match.group(1)
-        name = Path(urlparse(url).path).name or "document"
+            return unquote(match.group(1))
+        # WeCom's CDN percent-encodes non-ASCII names, so the last path segment arrives as
+        # ``%E4%B8%AD%E6%96%87.pdf`` rather than ``中文.pdf``. Decode here: the name is written
+        # into a cache path, and the encoded form is roughly 3x longer in bytes, which pushes
+        # an ordinary CJK filename past Windows' MAX_PATH and fails the write.
+        name = unquote(Path(urlparse(url).path).name) or "document"
         return name if "." in name else f"{name}{mimetypes.guess_extension(content_type) or '.bin'}"
 
     @staticmethod
